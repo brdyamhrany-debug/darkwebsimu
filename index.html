@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>چت آنلاین</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Vazirmatn',Tahoma,sans-serif;background:#e5ddd5;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+header{width:100%;max-width:700px;background:#5b7fa6;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:10}
+header .avatar{width:42px;height:42px;border-radius:50%;background:#fff;color:#5b7fa6;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:bold}
+header .info{flex:1}
+header .info b{font-size:15px}
+header .info small{font-size:12px;opacity:.85;display:block}
+#status{font-size:11px;background:rgba(255,255,255,.25);padding:3px 10px;border-radius:10px}
+#wrap{width:100%;max-width:700px;background:#efe7dd url('https://i.imgur.com/8U7Q6Xy.png');flex:1;display:flex;flex-direction:column;height:calc(100vh - 66px);box-shadow:0 0 10px rgba(0,0,0,.15)}
+#namebar{display:flex;gap:8px;padding:10px;background:#f6f6f6;border-bottom:1px solid #ddd}
+#namebar input{flex:1;border:1px solid #ccc;border-radius:8px;padding:9px;font-family:inherit;font-size:14px;outline:none}
+#namebar input:focus{border-color:#5b7fa6}
+#messages{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+.msg{max-width:78%;padding:8px 12px;border-radius:12px;font-size:14px;line-height:1.8;word-break:break-word;box-shadow:0 1px 1px rgba(0,0,0,.15);animation:pop .2s}
+@keyframes pop{from{transform:scale(.95);opacity:0}}
+.msg.me{align-self:flex-start;background:#dcf8c6;border-top-right-radius:2px}
+.msg.other{align-self:flex-end;background:#fff;border-top-left-radius:2px}
+.msg .user{font-size:11px;font-weight:bold;color:#5b7fa6;margin-bottom:2px}
+.msg.me .user{color:#3a8a3a}
+.msg img{max-width:100%;border-radius:8px;margin-top:6px;display:block;cursor:pointer}
+.msg .time{font-size:10px;color:#999;text-align:left;margin-top:3px}
+.system{align-self:center;background:#fdf3c6;color:#777;font-size:12px;padding:5px 14px;border-radius:12px;box-shadow:none}
+#preview{display:none;padding:8px 12px;background:#fff8e1;border-top:2px solid orange;align-items:center;gap:10px}
+#preview img{height:55px;border-radius:6px}
+#bar{display:flex;gap:8px;padding:10px;background:#f0f0f0;align-items:center}
+#bar input[type=text]{flex:1;border:none;border-radius:20px;padding:12px 16px;font-family:inherit;font-size:14px;outline:none}
+#bar button{border:none;cursor:pointer;border-radius:50%;width:46px;height:46px;font-size:20px;flex-shrink:0}
+#imgbtn{background:#fff;color:#5b7fa6}
+#sendbtn{background:#5b7fa6;color:#fff}
+#sendbtn:disabled{opacity:.5}
+footer{font-size:11px;color:#999;padding:8px}
+</style>
+</head>
+<body>
+<header>
+<div class="avatar">💬</div>
+<div class="info"><b>چت آنلاین عمومی</b><small id="count">در حال اتصال...</small></div>
+<span id="status">⏳ اتصال</span>
+</header>
+<div id="wrap">
+<div id="namebar">
+<input type="text" id="username" placeholder="اسمت رو بنویس (مثلاً علی)" maxlength="20">
+</div>
+<div id="messages"></div>
+<div id="preview">
+<img id="preview-img" src="">
+<span style="font-size:12px">عکس آماده ارساله</span>
+<button onclick="cancelImg()" style="border:1px solid red;background:none;color:red;border-radius:8px;padding:4px 10px;cursor:pointer">حذف</button>
+</div>
+<div id="bar">
+<input type="file" id="file" accept="image/*" style="display:none">
+<button id="imgbtn" onclick="document.getElementById('file').click()">📷</button>
+<input type="text" id="text" placeholder="پیام بنویس..." onkeydown="if(event.key==='Enter')send()">
+<button id="sendbtn" onclick="send()">➤</button>
+</div>
+</div>
+<footer>چت واقعی و آنلاین با سرویس رایگان ntfy.sh — همه افراد داخل همین صفحه پیام‌ها رو می‌بینن</footer>
+<script>
+const TOPIC = 'hoosha-public-chat-room-1';
+let myName = '';
+let seen = new Set();
+let pendingImg = '';
+
+const box = document.getElementById('messages');
+const statusEl = document.getElementById('status');
+const countEl = document.getElementById('count');
+
+document.getElementById('username').value = 'کاربر_' + Math.floor(Math.random()*9000+1000);
+document.getElementById('file').addEventListener('change', uploadImg);
+
+function scroll(){ box.scrollTop = box.scrollHeight; }
+function sys(t){ const d=document.createElement('div'); d.className='system'; d.textContent=t; box.appendChild(d); scroll(); }
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+sys('👋 خوش اومدی! اسمت رو بالا بنویس و چت کن. پیام‌ها برای همه ارسال میشه.');
+
+// دریافت پیام‌ها به‌صورت زنده
+const es = new EventSource('https://ntfy.sh/' + TOPIC + '/sse?since=all');
+es.onopen = ()=>{ statusEl.textContent='🟢 آنلاین'; };
+es.onerror = ()=>{ statusEl.textContent='🟡 تلاش مجدد...'; };
+es.onmessage = (e)=>{
+  try{
+    const outer = JSON.parse(e.data);
+    if(!outer.message) return;
+    const m = JSON.parse(outer.message);
+    if(!m.id || seen.has(m.id)) return;
+    seen.add(m.id);
+    addMsg(m);
+  }catch(err){}
+};
+
+function addMsg(m){
+  const d = document.createElement('div');
+  const me = (m.user === document.getElementById('username').value.trim() || m.user === myName);
+  d.className = 'msg ' + (me ? 'me' : 'other');
+  let h = '<div class="user">' + esc(m.user||'ناشناس') + '</div>';
+  if(m.text) h += '<div>' + esc(m.text) + '</div>';
+  if(m.image) h += '<img src="' + esc(m.image) + '" onclick="window.open(this.src)">';
+  h += '<div class="time">' + esc(m.time||'') + '</div>';
+  d.innerHTML = h;
+  box.appendChild(d);
+  scroll();
+}
+
+async function send(){
+  const inp = document.getElementById('text');
+  const text = inp.value.trim();
+  if(!text && !pendingImg) return;
+  myName = document.getElementById('username').value.trim() || 'ناشناس';
+  inp.value = '';
+  document.getElementById('sendbtn').disabled = true;
+  const msg = { id: Date.now()+''+Math.random().toString(16).slice(2), user: myName, text: text, image: pendingImg, time: new Date().toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'}) };
+  pendingImg=''; document.getElementById('preview').style.display='none';
+  try{
+    await fetch('https://ntfy.sh/'+TOPIC,{method:'POST',body:JSON.stringify(msg)});
+  }catch(e){ sys('❌ ارسال نشد، اینترنت رو چک کن'); }
+  document.getElementById('sendbtn').disabled = false;
+}
+
+async function uploadImg(e){
+  const f = e.target.files[0];
+  if(!f) return;
+  if(f.size > 4*1024*1024){ alert('حجم عکس باید کمتر از ۴ مگ باشه'); return; }
+  sys('⏳ در حال آپلود عکس...');
+  const fd = new FormData(); fd.append('file', f);
+  try{
+    const r = await fetch('https://0x0.st',{method:'POST',body:fd});
+    const url = (await r.text()).trim();
+    if(url.startsWith('http')){
+      pendingImg = url;
+      document.getElementById('preview-img').src = url;
+      document.getElementById('preview').style.display = 'flex';
+      sys('✅ عکس آماده شد، دکمه ارسال رو بزن');
+    } else throw 0;
+  }catch(err){
+    const rd = new FileReader();
+    rd.onload = ()=>{ pendingImg = rd.result; document.getElementById('preview-img').src = rd.result; document.getElementById('preview').style.display='flex'; };
+    rd.readAsDataURL(f);
+  }
+  e.target.value='';
+}
+function cancelImg(){ pendingImg=''; document.getElementById('preview').style.display='none'; }
+</script>
+</body>
+</html>
